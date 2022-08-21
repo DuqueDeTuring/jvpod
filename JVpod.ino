@@ -1,147 +1,108 @@
+/* ---------------------------------------------------------------------
+   JVpod: a simple mp3 player for podcasts.
+
+   The complete project uses several components:
+   - a DFMiniPlayer module with a micro SD card
+   - an Arduino Uno R3
+   - an LCD Key shield (2 rows, 16 characters per row) for the display
+   - a potentiometer for volume control
+   - a push button to play a random episode
+   - a toggle switch to turn on/off the autoplay feature after and episode ends
+
+   There is nothing special here about podcasts (they are just mp3 files), is 
+   just the original purpose of the project.
+   
+  -------
+  
+  JVpod: un tocador de mp3 simple para podcasts.
+
+  El proyecto completo usa varios componentes:
+  - un módulo DFMiniPlayer con tarjeta micro SD
+  - un Arduino Uno R3
+  - un LCD Key Shield (2 líneas, 16 columnas por línea) como pantalla
+  - un potenciómetro para control de volumen
+  - un botón para tocar un episodio aleatorio
+  - un switch para apagar/encender la funcionalidad del modo para continuar tocando
+    luego de que un episodio terminó.
+
+  En realidad no hay nada especial aquí con respecto a podcasts (son sólo archivos mp3),
+  simplemente es el objetivo personal para el proyecto.
+  
+--------------------------------------------------------------------- */
+
 #include "Arduino.h"
 #include <DFMiniMp3.h>
 #include "SoftwareSerial.h"
 #include <LiquidCrystal.h>
-
-class Mp3Notify;
-typedef DFMiniMp3<SoftwareSerial, Mp3Notify> DfMp3;
-SoftwareSerial secondarySerial(11, 13); // RX, TX
-DfMp3 player(secondarySerial);
+#include "jvpod.h"
 
 
-const int RANDOM_PLAY_PIN=A3;
-int prevRandomButton = HIGH;
+void setup() {
+  Serial.begin(115200);
+  Serial.println("initializing...");
+  randomSeed(analogRead(FREE_ANALOG_PIN));
+  
+  player.begin();
+  player.reset();
+  playerSerial.begin(9600);
 
-const int MAX_FOLDERS = 99;
-int filesPerFolder[MAX_FOLDERS];
-int totalPodcasts = 0;
-int totalEpisodios = 0;
-int currentFolder = 1;
-int playingFileNumber = 1;
-int lastFolder = -1;
+  lcd.begin(16, 2);
+  createCustomCharacters();
 
-const int INIT_VOLUME = 12;
-const int MIN_VOLUME = 0;
-const int MAX_VOLUME = 30;
-int prevVolAnalogValue = 0;
-const int analogVolumeChgThreshold = 3; // The analog reading of the potentiometer value "jitters" a little (expected)
-int volume = INIT_VOLUME;
-boolean playing = false;
-boolean restartPlay = true;
+  splash();
+  lcd.setCursor(15, 1);
+  lcd.blink();
+  countPerFolder();
+  lcd.noBlink();
+  lcd.clear();
+  
+  lcd.setCursor(0, 0);
+  lcd.print("Se encontraron ");
+  lcd.setCursor(0, 1);
+  lcd.print(String(totalPodcasts) + " podcasts con un total de " + String(totalEpisodios) + " episodios");
+  delay(1000);
+  for (int positionCounter = 0; positionCounter < 38; positionCounter++) {
+    lcd.scrollDisplayLeft();
+    delay(400);
+  }
 
+  player.setVolume(INIT_VOLUME);
 
+  // pin for the random play button
+  pinMode(RANDOM_PLAY_PIN, INPUT_PULLUP);
+}
 
-const int NO_KEY = -1;
-const int KEY_UP = 1;
-const int KEY_DOWN = 2;
-const int KEY_LEFT = 3;
-const int KEY_RIGHT = 4;
-const int KEY_SELECT = 5;
-int prevKey = NO_KEY;
-const int MIN_KEY_PRESS_TIME = 50;
-long lastKeyPressed = MIN_KEY_PRESS_TIME;
+void loop() {
+  player.loop();
+  
+  int randomButton = digitalRead(RANDOM_PLAY_PIN);
+  if (randomButton != prevRandomButton) {
+    if (randomButton == HIGH) {
+      playRandomFile();
+    }
+    prevRandomButton = randomButton;
+  }
+  
+  updateVolume();
+  
+  int k = readFromKeypad();
+  if (k == NO_KEY && prevKey != NO_KEY) {
+    actOnKey(prevKey);
+  }
+  prevKey = k;
 
-const int pauseChar = 0;
-byte pauseSymbol[8] = {
-  B11011,
-  B11011,
-  B11011,
-  B11011,
-  B11011,
-  B11011,
-  B11011,
-  B11011,
-};
-
-const int playChar = 1;
-byte playSymbol[8] = {
-  B11000,
-  B11100,
-  B11110,
-  B11111,
-  B11111,
-  B11110,
-  B11100,
-  B11000,
-};
-
-const int stopChar = 2;
-byte stopSymbol[8] = {
-  B00000,
-  B00000,
-  B01110,
-  B01110,
-  B01110,
-  B01110,
-  B00000,
-  B00000,
-};
-
-const int vol1Char = 3;
-byte vol1Symbol[8] = {
-  B00000,
-  B00000,
-  B00000,
-  B00000,
-  B00000,
-  B00000,
-  B11111,
-  B11111,
-};
-
-const int vol2Char = 4;
-byte vol2Symbol[8] = {
-  B00000,
-  B00000,
-  B00000,
-  B00000,
-  B11111,
-  B11111,
-  B11111,
-  B11111,
-};
+  if (shouldUpdateScreen && ((millis() - prevUpdate) > UPDATE_INTERVAL)) {
+    prevUpdate = millis();
+    updateScreen();
+  }
+}
 
 
-const int vol3Char = 5;
-byte vol3Symbol[8] = {
-  B00000,
-  B00000,
-  B11111,
-  B11111,
-  B11111,
-  B11111,
-  B11111,
-  B11111,
-};
-
-const int vol4Char = 6;
-byte vol4Symbol[8] = {
-  B11111,
-  B11111,
-  B11111,
-  B11111,
-  B11111,
-  B11111,
-  B11111,
-  B11111,
-};
-
-
-const int UPDATE_INTERVAL = 50;
-int prevUpdate = 0;
-boolean shouldUpdateScreen = true;
-
-//LCD Shield
-const int pin_RS = 8;
-const int pin_EN = 9;
-const int pin_d4 = 4;
-const int pin_d5 = 5;
-const int pin_d6 = 6;
-const int pin_d7 = 7;
-const int pin_BL = 10;
-LiquidCrystal lcd( pin_RS,  pin_EN,  pin_d4,  pin_d5,  pin_d6,  pin_d7);
-String error = "";
-
+/* 
+ *  Just a little "splash" screen when we boot the Arduino.
+ *  --
+ *  Una pequeña pantalla de introducción cuando iniciamos el Arduino.
+ */
 void splash() {
   lcd.clear();
   lcd.setCursor(0, 0);
@@ -157,61 +118,43 @@ void splash() {
   lcd.print("por favor espere");
 }
 
-void setup() {
-  randomSeed(analogRead(2));
-  Serial.begin(115200);
-  Serial.println("initializing...");
 
-  player.begin();
-  player.reset();
-  secondarySerial.begin(9600);
-
-  lcd.begin(16, 2);
-  createCustomCharacters();
-
-  splash();
-  countPerFolder();
-  lcd.clear();
-
-  lcd.setCursor(0, 0);
-  lcd.print("Se encontraron ");
-  lcd.setCursor(0, 1);
-  lcd.print(String(totalPodcasts) + " podcasts con un total de " + String(totalEpisodios) + " episodios");
-  delay(1000);
-  for (int positionCounter = 0; positionCounter < 38; positionCounter++) {
-    lcd.scrollDisplayLeft();
-    delay(400);  //Scrolling speed
-  }
-  //delay(3000);
-
-  player.setVolume(INIT_VOLUME);
-
-  // pin for random play
-  pinMode(RANDOM_PLAY_PIN, INPUT_PULLUP);
-}
-
-void loop() {
-  player.loop();
-  int randomButton = digitalRead(A3);
-  if (randomButton != prevRandomButton) {
-    if (randomButton == HIGH) {
-      randomPlay();
-    }
-    prevRandomButton = randomButton;
-  }
-  updateVolume();
-  int k = readFromKeypad();
-  if (k == NO_KEY && prevKey != NO_KEY) {
-    actOnKey(prevKey);
-  }
-  prevKey = k;
-
-  if (shouldUpdateScreen && ((millis() - prevUpdate) > UPDATE_INTERVAL)) {
-    prevUpdate = millis();
-    updateScreen();
-  }
-}
-
+/* 
+ * We count how many folders we have and how many files per folder.
+ * 
+ * The DFMiniMp3 has a getTotalTrackCountSd function to get how many
+ * folders are in the card, so... why this one?
+ * In my particular module it just didn't work (among other functions). 
+ * I tried with multiple libraries, checked the hex command code 
+ * against a PDF I found in a chinese website, changed timings and 
+ * nothing worked with my MH2024K-24SS module.
+ * 
+ * What we do here is iterate from folder 0 to MAX_FOLDERS
+ * asking for the track count for each one BUT we stop as soon as
+ * we get 0 as the track count for a folder.
+ * 
+ * Now, after reaching the last folder I reset the player, why?
+ * I found that asking for the track count in a non existent
+ * folder (last one + 1)...gets weird behavior afterwards :-) .
+ * 
+ * --
+ * 
+ * Contamos cuántas carpetas hay y cuántos archivos por carpeta.
+ * 
+ * El DFMiniMp3 ya tiene una función XXXXXXX para obtener cuántas carpetas 
+ * hay en la tarjeta, entonces...¿para qué ésta?
+ * En el módulo que usé para el proyecto simplemente no funciona (entre otras funciones).
+ * Intenté con múltiples librerías, revisé el comando en hexadecimal enviado al módulo
+ * contra el documentado en un PDF que encontré en un sitio de China, cambié 
+ * los tiempos/espera que hay que tener en la comunicación con el módulo y nada funcionó
+ * con el módulo a base del MH2024K-24SS que usé.
+ * 
+ * Por otro lado, luego de llegar a la última carpeta hago un reset del módulo mp3, 
+ * ¿por qué?
+ * Encontré que luego de usar getFolderTrackCount para obtener el total de archivos
+ * en una carpeta que NO existe (justo después de la úlima que existe)...el módulo
+ * exhibe comportamiento errático a partir de ese momento :-) .
+ */
 void countPerFolder() {
   totalEpisodios = 0;
   for (int i = 0; i < MAX_FOLDERS; i++) {
@@ -234,7 +177,7 @@ void countPerFolder() {
 
   totalPodcasts = folder - 1;
   Serial.println("Total folders:" + String(totalPodcasts));
-  Serial.println("Reset player...");
+  Serial.println("Reset mp3 player module...");
   player.reset();
 }
 
@@ -262,15 +205,15 @@ int readFromKeypad() {
 }
 
 void actOnKey(int k) {
-  if (((millis() - lastKeyPressed) < MIN_KEY_PRESS_TIME) || (k == NO_KEY)) {
+  if ((k == NO_KEY) || ((millis() - lastKeyPressed) < MIN_KEY_PRESS_TIME)) {
     return;
   }
   lastKeyPressed = millis();
 
   if (k == KEY_UP) {
-    folderUp();
+    moveToNextFolder();
   } else if (k == KEY_DOWN) {
-    folderDown();
+    moveToPrevFolder();
   } else if (k == KEY_SELECT) {
     togglePlaying();
   } else if (k == KEY_LEFT) {
@@ -282,47 +225,33 @@ void actOnKey(int k) {
 
 void playPrevious() {
   pause();
-  //  Serial.println("-----");
-  //  Serial.println("currentFolder:" + String(currentFolder));
-  //  Serial.println("play previous");
-  //  Serial.println("playingFileNumber:" + String(playingFileNumber));
+
   if (playingFileNumber == 1) {
+    // the previous to the first is the last episode
     playingFileNumber = filesPerFolder[currentFolder - 1];
   } else {
     playingFileNumber--;
   }
   restartPlay = true;
-  //  Serial.println("nuevo:" + String(playingFileNumber));
-  //  Serial.println("-----");
-  //  Serial.println("");
-  // player.playFolderTrack(currentFolder, playingFileNumber);
   shouldUpdateScreen = true;
-
 }
 
 void playNext() {
   pause();
-  //  Serial.println("-----");
-  //  Serial.println("currentFolder:" + String(currentFolder));
-  //  Serial.println("playnext");
-  //  Serial.println("playingFileNumber:" + String(playingFileNumber));
+
   if (playingFileNumber == filesPerFolder[currentFolder - 1]) {
+    // the next episode after the last one is the first episode
     playingFileNumber = 1;
   } else {
     playingFileNumber++;
   }
   restartPlay = true;
-
-  //  Serial.println("nuevo:" + String(playingFileNumber));
-  //  Serial.println("-----");
-  //  Serial.println("");
-
   shouldUpdateScreen = true;
 }
 
 
 void pause() {
-  Serial.println("PAUSA!:" + String(playing));
+  Serial.println("PAUSE:" + String(playing));
 
   if (playing) {
     playing = false;
@@ -347,7 +276,7 @@ void togglePlaying() {
     player.playFolderTrack(currentFolder, playingFileNumber);
     return;
   }
-  //  Serial.println(player.readState());
+
   if (playing) {
     pause();
   } else {
@@ -357,8 +286,26 @@ void togglePlaying() {
   waitMilliseconds(200);
 }
 
-void folderUp() {
+
+/* 
+ *  We change the current folder number to the next one.
+ *  
+ *  What happens if the current folder is the last one?
+ *  Then we set the first folder as the current folder.
+ *  (if we reach the end we return to the beginning)
+ *  ---
+ *  
+ *  Cambiamos la carpeta actual a la siguiente.
+ *  
+ *  ¿Qué pasa cuando la carpeta actual es la última?
+ *  Entonces ponemos la primera carpeta como la actual.
+ *  (si llegamos al final, regresamos al inicio)
+ *  
+ */
+void moveToNextFolder() {
   stop();
+
+  // every time we change podcast we start with the first episode -- cada vez que cambiamos de podcast iniciamos con el primer episodio
   playingFileNumber = 1;
 
   if (currentFolder < totalPodcasts) {
@@ -366,23 +313,34 @@ void folderUp() {
   } else {
     currentFolder = 1;
   }
-  Serial.println("Nexto podcast:" + String(currentFolder));
-  //  restartPlay = true;
-  //  shouldUpdateScreen = true;
 }
 
-
-void folderDown() {
+/* 
+ *  We change the current folder number to the previous one.
+ *  
+ *  What happens if the current folder is the last one?
+ *  Then we set the first folder as the current folder.
+ *  (We reach the end then we return to the beginning)
+ *  ---
+ *  
+ *  Cambiamos la carpeta actual actual a la siguiente.
+ *  
+ *  ¿Qué pasa cuando la carpeta actual es la última?
+ *  Entonces ponemos la primera carpeta como la actual.
+ *  (llegamos al final por lo que regresamos al inicio)
+ *  
+ */
+void moveToPrevFolder() {
   stop();
+  
+  // every time we change podcast we start with the first episode -- cada vez que cambiamos de podcast iniciamos con el primer episodio
   playingFileNumber = 1;
+  
   if (currentFolder > 1) {
     currentFolder--;
   } else {
     currentFolder = totalPodcasts;
   }
-  Serial.println("Prev podcast:" + String(currentFolder));
-  restartPlay = true;
-  shouldUpdateScreen = true;
 }
 
 
@@ -391,44 +349,68 @@ void updateScreen() {
   lcd.clear();
   lcd.setCursor(0, 0);
 
-  if (error == "") {
-    lcd.print("Episodio: " + String(playingFileNumber));
-    lcd.setCursor(15, 0);
-    if (!playing) {
-      if (restartPlay) {
-        lcd.write(stopChar);
-      } else {
-        lcd.write(pauseChar);
-      }
-    } else {
-      lcd.write(playChar);
-    }
-
-    lcd.setCursor(0, 1);
-    lcd.print("Podcast: " + String(currentFolder));
-
-    lcd.setCursor(15, 1);
-    if (volume == 0) {
-      lcd.print("");
-    } else {
-      int v = map(volume, MIN_VOLUME+2, MAX_VOLUME - 2, vol1Char, vol4Char);
-      lcd.write(v);
-    }
-
-  } else {
+  if (error != "") {
     lcd.print(error);
+    return;
+  }
+  
+  lcd.print("Episodio: " + String(playingFileNumber));
+  lcd.setCursor(15, 0);
+  if (!playing) {
+    if (restartPlay) {
+      lcd.write(stopChar);
+    } else {
+      lcd.write(pauseChar);
+    }
+  } else {
+    lcd.write(playChar);
+  }
+
+  lcd.setCursor(0, 1);
+  lcd.print("Podcast: " + String(currentFolder));
+
+  lcd.setCursor(15, 1);
+  if (volume == 0) {
+    lcd.print("");
+  } else {
+    int v = charForVolumeLevel(volume);
+    lcd.write(v);
   }
 }
 
+/*
+ * For a specific volume level we return the custom character to represent it.
+ * --
+ * Para un volumen específico retornamos el caracter personalizado correspondiente.
+ */ 
+int charForVolumeLevel(int vol) {
+  // the +2 and -2 is just a little aesthethic adjustment done to show the level just like I want when we are near zero or need max volume
+  // el +2 y el -2 es un pequeño ajuste estético para mostrar el nivel exactamente como quiero cuando estamos cerca de 0 o del máximo del volumen
+  int customChar = map(vol, MIN_VOLUME + 2, MAX_VOLUME - 2, vol1Char, vol4Char);
+  return customChar;
+}
 
+/*
+ * We update the volume according to the reading of an analog PIN,
+ * which maybe connected to a potentiometer.
+ * The value for the volume is update and the player module volume changed 
+ * but only if the change detected between the current value and a previous one
+ * is above a threshold.
+ * --
+ * Actualizamos el volumen de acuerdo al valor leído de un pin analógico
+ * que puede estar conectado a un potenciómetro.
+ * El valor del volumen se actualiza y el volumen del módulo mp3 se cambia
+ * pero sólo si el cambio detectado entre el valor actual y uno previo 
+ * sobre pasa un límite preestablecido.
+ */ 
 void updateVolume() {
   int analogValue = analogRead(A5);
-  // we change the volume only when there is enough change in the value
   if (abs(prevVolAnalogValue - analogValue) < analogVolumeChgThreshold) {
     return;
   }
+  
   int selectedVolume = map(analogValue, 0, 1023, MIN_VOLUME, MAX_VOLUME);
-
+  
   if (abs(selectedVolume - volume) > analogVolumeChgThreshold) {
     volume = selectedVolume;
     player.setVolume(volume);
@@ -453,22 +435,39 @@ void waitMilliseconds(uint16_t msWait)
   }
 }
 
-int randomPlay() {
+int playRandomFile() {
   stop();
   int podcast = random(totalPodcasts);
-  int episode = random(filesPerFolder[podcast]);
-  currentFolder = podcast + 1;
-  playingFileNumber = episode + 1;
 
-  randomAnimation(3000);
+  playingFileNumber = random(filesPerFolder[podcast]) + 1; // folders and tracks start from 1
+  currentFolder = podcast + 1;
+
+  randomAnimation(3500);
   togglePlaying();
   randomAnimation(500);
   shouldUpdateScreen = true;
 }
 
+/*
+ * Shows a silly random animation using custom characters
+ * (an LCD Shield feature) and at the end restores the
+ * initial set of custom characters.
+ * Why that at the end? because the LCD shield I am using allows
+ * a maximum of 7 custom characters, so for the animation
+ * we use the 7 available slots and then we must restore the 
+ * set created at the program setup.
+ * --
+ * 
+ * Muestra una animación (sin mayor sentido) utilizando
+ * caracteres personalizados (una función del LCD Shield) y al final
+ * restauramos el conjunto original de caracteres personalizados.
+ * ¿Por qué hacemos eso al final? Porque el LCD Shield que uso
+ * permite definir un máximo de 7 caracteres, la animación usa 
+ * todos los 7 así que debemos asegurarnos de restablecer los 
+ * creados al inicio del programa (en la función setup()).
+ */ 
 void randomAnimation(int duration) {
   shouldUpdateScreen = false;
-  // generate random chars
   for (int i = 0; i < 7; i++) {
     byte rSymbol[8] = {
       random(32),
@@ -482,51 +481,6 @@ void randomAnimation(int duration) {
     };
     lcd.createChar(i, rSymbol);
   }
-  //  byte rSymbol1[8] = {
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //  };
-  //  byte rSymbol2[8] = {
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //  };
-  //  byte rSymbol3[8] = {
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //  };
-  //  byte rSymbol4[8] = {
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //    random(32),
-  //  };
-  //  lcd.createChar(3, rSymbol1);
-  //  lcd.createChar(4, rSymbol2);
-  //  lcd.createChar(5, rSymbol3);
-  //  lcd.createChar(6, rSymbol4);
-
   long start = millis();
   while ((millis() - start) < duration) {
     lcd.setCursor(random(16), random(2));
@@ -535,8 +489,29 @@ void randomAnimation(int duration) {
   }
   waitMilliseconds(500);
 
-  // we restore the basic set of custom characters
   createCustomCharacters();
+}
+
+/* 
+ * The program a few custom characters to show information in 
+ * the LCD Shield display, for example for the playing status:
+ * pause, playing, stopped and volume level.
+ * --
+ * El programa utiliza varios caracteres personalziados para mostrar
+ * información en la pantalla del LCD Shield, por ejemplo para el
+ * estado del mp3 player: pausa, tocando, detenido y el nivel de volumen.
+ */
+void createCustomCharacters() {
+  // basic set of characters for playing status
+  lcd.createChar(pauseChar, pauseSymbol);
+  lcd.createChar(playChar, playSymbol);
+  lcd.createChar(stopChar, stopSymbol);
+
+  // 4 volume level characters
+  lcd.createChar(vol1Char, vol1Symbol);
+  lcd.createChar(vol2Char, vol2Symbol);
+  lcd.createChar(vol3Char, vol3Symbol);
+  lcd.createChar(vol4Char, vol4Symbol);
 }
 
 // Original class comes from https://github.com/ghmartin77/DFPlayerAnalyzer
@@ -588,17 +563,3 @@ class Mp3Notify
       error = "Sin TARJETA!";
     }
 };
-
-
-void createCustomCharacters() {
-  // basic set of characters for playing status
-  lcd.createChar(pauseChar, pauseSymbol);
-  lcd.createChar(playChar, playSymbol);
-  lcd.createChar(stopChar, stopSymbol);
-
-  // volume level
-  lcd.createChar(vol1Char, vol1Symbol);
-  lcd.createChar(vol2Char, vol2Symbol);
-  lcd.createChar(vol3Char, vol3Symbol);
-  lcd.createChar(vol4Char, vol4Symbol);
-}
