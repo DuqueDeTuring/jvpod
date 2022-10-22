@@ -41,3 +41,11 @@ Este es un pequeño proyecto que utiliza un Arduino y unos cuantos componentes p
 + Audio Jack (3.5mm) para parlantes
 + 3.3v regulador (LD1117V33): el DFMiniPlayer es muy sensible a caídas de voltage. Usé el pin de 5v del Arduino conectado a este regulador para alimentar el DFMiniPlayer.
 + Tarjetas Micro SD
+
+
+## Algunas imágenes
+
+![](/images/1.jpg)
+![](/images/2.jpg)
+![](/images/3.jpg)
+![](/images/4.jpg)
