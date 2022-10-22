@@ -70,6 +70,10 @@ void setup() {
 
   // pin for the random play button
   pinMode(RANDOM_PLAY_PIN, INPUT_PULLUP);
+
+  // pin for the auto play toggle switch
+  pinMode(AUTO_PLAY_PIN, INPUT_PULLUP);
+
 }
 
 void loop() {
@@ -81,6 +85,13 @@ void loop() {
       playRandomFile();
     }
     prevRandomButton = randomButton;
+  }
+
+  int playSwitch = digitalRead(AUTO_PLAY_PIN);
+  if (autoPlaySwitch != playSwitch) {
+    autoPlaySwitch = playSwitch;
+    shouldUpdateScreen=true;
+    Serial.println(autoPlaySwitch);
   }
   
   updateVolume();
@@ -355,6 +366,10 @@ void updateScreen() {
   }
   
   lcd.print("Episodio: " + String(playingFileNumber));
+  if (autoPlaySwitch) {
+    lcd.setCursor(14, 0);  
+    lcd.print("A");
+  }
   lcd.setCursor(15, 0);
   if (!playing) {
     if (restartPlay) {
@@ -545,8 +560,13 @@ class Mp3Notify
     {
       Serial.print("Play finished for #");
       Serial.println(track);
-      // TODO
+
       stop();
+      
+      if (autoPlaySwitch) {
+        playNext();
+        togglePlaying();
+      }
 
     }
     static void OnPlaySourceOnline([[maybe_unused]] DfMp3& mp3, DfMp3_PlaySources source)

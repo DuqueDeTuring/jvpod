@@ -3,6 +3,9 @@ const int FREE_ANALOG_PIN = A2;
 const int RANDOM_PLAY_PIN = A3;
 int prevRandomButton = HIGH;
 
+const int AUTO_PLAY_PIN = A2;
+int autoPlaySwitch = HIGH;
+
 // Folders and episodes
 const int MAX_FOLDERS = 99;
 int filesPerFolder[MAX_FOLDERS];
