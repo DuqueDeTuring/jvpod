@@ -7,7 +7,7 @@ La base de su funcionalidad está provista por un módulo DFMiniPlayer.
 
 ## Motivación 
 
-Hace años mi padre usaba en su trabajo aplicaciones como Photoshop, Illustrator (entre otros programas) pero desde entonces no ha querido tener nada relacionado con móviles, tabletas o pc/macs: sólo tiene una línea telefónica fija. La única excepción que hizo hace unos años fue aceptar mi iPod (de 80Gb).
+Hace años mi papá usaba en su trabajo aplicaciones como Photoshop, Illustrator (entre otros programas) pero desde entonces no ha querido tener nada relacionado con móviles, tabletas o pc/macs: sólo tiene una línea telefónica fija. La única excepción que hizo hace unos años fue aceptar mi iPod (de 80Gb).
 
 Después de años y años de uso, tristemente el iPod finalmente dejó de funcionar y decidí encontrarle una solución aceptable porque él disfruta muchísimo escuchar podcasts relacionados con ciencia y biografías.
 
